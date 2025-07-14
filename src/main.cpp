@@ -155,8 +155,13 @@ void send_sequence_task(void) {
             break;
         case SEQ_PRESS:
             if (key_idx < sequences[current_sequence].len) {
-                // FIX: Use a 6-byte array for the keycode
-                uint8_t keycodes[6] = { sequences[current_sequence].seq[key_idx], 0, 0, 0, 0, 0 };
+                uint8_t key = sequences[current_sequence].seq[key_idx];
+                uint8_t keycodes[6] = {0, 0, 0, 0, 0, 0};
+                if (key == HID_KEY_BACKSPACE) {
+                    keycodes[0] = HID_KEY_BACKSPACE; // Standard keyboard Backspace
+                } else {
+                    keycodes[0] = key; // Keypad or other
+                }
                 tud_hid_keyboard_report(0, 0, keycodes);
                 seq_state = SEQ_RELEASE;
                 seq_timer = now;
@@ -217,70 +222,61 @@ int main(void)
     gpio_set_function(UART_TX_PIN, GPIO_FUNC_UART);
     gpio_set_function(UART_RX_PIN, GPIO_FUNC_UART);
 
+    // Ensure idle sequence at startup
+    seq_state = SEQ_IDLE;
+    last_sequence_time = get_absolute_time();
+
     static absolute_time_t last_poll = {0};
 
     while (1)
     {
         tud_task();
 
-        // UART echo and debug print, and debug mode control
+        // UART echo and HID trigger
         if (uart_is_readable(UART_ID)) {
             uint8_t ch = uart_getc(UART_ID);
 
             // Echo the character back
             uart_putc(UART_ID, ch);
 
-            // Debug mode control
-            if (ch == 'D' || ch == 'd') {
-                debug_mode = true;
-                start_demo_sequence(); // <--- Start the demo sequence
-                const char* msg = "\r\nDebug mode ON\r\n";
-                for (const char* p = msg; *p; ++p) uart_putc(UART_ID, *p);
-            } else if (ch == 'N' || ch == 'n') {
-                debug_mode = false;
-                const char* msg = "\r\nNormal mode ON\r\n";
-                for (const char* p = msg; *p; ++p) uart_putc(UART_ID, *p);
-            } else {
-                // Map UART character to HID keycode
-                uint8_t keycode = 0;
-                switch (ch) {
-                    case '0': keycode = HID_KEYPAD_0; break;
-                    case '1': keycode = HID_KEYPAD_1; break;
-                    case '2': keycode = HID_KEYPAD_2; break;
-                    case '3': keycode = HID_KEYPAD_3; break;
-                    case '4': keycode = HID_KEYPAD_4; break;
-                    case '5': keycode = HID_KEYPAD_5; break;
-                    case '6': keycode = HID_KEYPAD_6; break;
-                    case '7': keycode = HID_KEYPAD_7; break;
-                    case '8': keycode = HID_KEYPAD_8; break;
-                    case '9': keycode = HID_KEYPAD_9; break;
-                    case '*': keycode = HID_KEYPAD_ASTERISK; break;
-                    case '/': keycode = 0x54; /* HID_KEYPAD_SLASH */ break;
-                    case '-': keycode = 0x56; /* HID_KEYPAD_MINUS */ break;
-                    case '+': keycode = 0x57; /* HID_KEYPAD_PLUS */ break;
-                    case '\b': keycode = 0x2A; /* HID_KEY_BACKSPACE */ break;
-                    case '\r':
-                    case '\n': keycode = HID_KEYPAD_ENTER; break;
-                    default: break;
-                }
+            // Map UART character to HID keycode
+            uint8_t keycode = 0;
+            switch (ch) {
+                case '0': keycode = HID_KEYPAD_0; break;
+                case '1': keycode = HID_KEYPAD_1; break;
+                case '2': keycode = HID_KEYPAD_2; break;
+                case '3': keycode = HID_KEYPAD_3; break;
+                case '4': keycode = HID_KEYPAD_4; break;
+                case '5': keycode = HID_KEYPAD_5; break;
+                case '6': keycode = HID_KEYPAD_6; break;
+                case '7': keycode = HID_KEYPAD_7; break;
+                case '8': keycode = HID_KEYPAD_8; break;
+                case '9': keycode = HID_KEYPAD_9; break;
+                case '*': keycode = HID_KEYPAD_ASTERISK; break;
+                case '/': keycode = HID_KEYPAD_SLASH; break;
+                case '-': keycode = HID_KEYPAD_MINUS; break;
+                case '+': keycode = HID_KEYPAD_PLUS; break;
+                case '\b': keycode = HID_KEY_BACKSPACE; break;
+                case '\r':
+                case '\n': keycode = HID_KEYPAD_ENTER; break;
+                default: break;
+            }
 
-                // Print debug message to UART
-                char msg[64];
-                snprintf(msg, sizeof(msg),
-                    "Received character 0x%02X ('%c') from UART, send HID %s\r\n",
-                    ch, (ch >= 32 && ch <= 126) ? ch : '.', keycode ? "YES" : "NO");
-                for (char *p = msg; *p; ++p) uart_putc(UART_ID, *p);
+            // Print debug message to UART
+            char msg[64];
+            snprintf(msg, sizeof(msg),
+                "Received character 0x%02X ('%c') from UART, send HID %s\r\n",
+                ch, (ch >= 32 && ch <= 126) ? ch : '.', keycode ? "YES" : "NO");
+            for (char *p = msg; *p; ++p) uart_putc(UART_ID, *p);
 
-                // Only trigger sequence if not in debug mode and key is mapped
-                if (keycode && !debug_mode) {
-                    start_single_key_sequence(keycode);
-                }
+            // Trigger sequence if key is mapped
+            if (keycode) {
+                start_single_key_sequence(keycode);
             }
         }
 
         // Always run HID sequence
         send_sequence_task();
-
     }
     return 0;
 }
