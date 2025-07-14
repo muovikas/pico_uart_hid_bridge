@@ -70,20 +70,20 @@ static void send_hid_report(bool keys_pressed, const uint8_t keycodes[6])
 
     if (keys_pressed)
     {
-        tud_hid_keyboard_report(REPORT_ID_KEYBOARD, 0, keycodes);
+        tud_hid_keyboard_report(0, 0, keycodes);
     }
     else
     {
-        tud_hid_keyboard_report(REPORT_ID_KEYBOARD, 0, NULL);
+        tud_hid_keyboard_report(0, 0, NULL);
     }
 }
 
 
 void send_test() {
-    uint8_t keycode = HID_KEY_A;
-    tud_hid_keyboard_report(REPORT_ID_KEYBOARD, 0, &keycode);
+    uint8_t keycode = HID_KEYPAD_ASTERISK;
+    tud_hid_keyboard_report(0, 0, &keycode);
     sleep_ms(10);
-    tud_hid_keyboard_report(REPORT_ID_KEYBOARD, 0, NULL);
+    tud_hid_keyboard_report(0, 0, NULL);
     sleep_ms(5);
 }
 
