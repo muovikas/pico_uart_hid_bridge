@@ -35,6 +35,9 @@
 
 #include "hardware/gpio.h"
 #include "hardware/uart.h"
+
+volatile bool debug_mode = false;
+
 #define UART_ID uart0
 #define BAUD_RATE 9600
 #define UART_TX_PIN 0
@@ -194,23 +197,36 @@ int main(void)
     {
         tud_task();
 
-        // UART echo and debug print
+        // UART echo and debug print, and debug mode control
         if (uart_is_readable(UART_ID)) {
             uint8_t ch = uart_getc(UART_ID);
 
             // Echo the character back
             uart_putc(UART_ID, ch);
 
-            // Print debug message to UART
-            char msg[64];
-            snprintf(msg, sizeof(msg),
-                "Received character 0x%02X ('%c') from UART, send HID xxx\r\n",
-                ch, (ch >= 32 && ch <= 126) ? ch : '.');
-            for (char *p = msg; *p; ++p) uart_putc(UART_ID, *p);
+            // Debug mode control
+            if (ch == 'D' || ch == 'd') {
+                debug_mode = true;
+                const char* msg = "\r\nDebug mode ON\r\n";
+                for (const char* p = msg; *p; ++p) uart_putc(UART_ID, *p);
+            } else if (ch == 'N' || ch == 'n') {
+                debug_mode = false;
+                const char* msg = "\r\nNormal mode ON\r\n";
+                for (const char* p = msg; *p; ++p) uart_putc(UART_ID, *p);
+            } else {
+                // Print debug message to UART
+                char msg[64];
+                snprintf(msg, sizeof(msg),
+                    "Received character 0x%02X ('%c') from UART, send HID xxx\r\n",
+                    ch, (ch >= 32 && ch <= 126) ? ch : '.');
+                for (char *p = msg; *p; ++p) uart_putc(UART_ID, *p);
+            }
         }
 
-        // Continue running the HID sequence as before
-        send_sequence_task();
+        // Only run HID sequence in debug mode
+        if (debug_mode) {
+            send_sequence_task();
+        }
     }
     return 0;
 }
