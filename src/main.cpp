@@ -87,6 +87,96 @@ void send_test() {
     sleep_ms(5);
 }
 
+typedef enum {
+    SEQ_IDLE,
+    SEQ_PRESS,
+    SEQ_RELEASE,
+    SEQ_WAIT_NEXT
+} seq_state_t;
+
+const uint8_t seq1[] = {
+    HID_KEYPAD_ASTERISK,
+    HID_KEYPAD_7,
+    HID_KEYPAD_0,
+    HID_KEYPAD_6,
+    HID_KEYPAD_0,
+    HID_KEYPAD_ENTER,
+    HID_KEY_BACKSPACE,
+    HID_KEYPAD_0,
+};
+const uint8_t seq2[] = {
+    HID_KEYPAD_ASTERISK,
+    HID_KEYPAD_1,
+    HID_KEYPAD_4,
+    HID_KEYPAD_0,
+    HID_KEYPAD_7,
+    HID_KEYPAD_4,
+    HID_KEYPAD_ENTER,
+    HID_KEY_BACKSPACE,
+    HID_KEYPAD_0,
+};
+
+typedef struct {
+    const uint8_t* seq;
+    size_t len;
+} keyseq_t;
+
+keyseq_t sequences[] = {
+    { seq1, sizeof(seq1) },
+    { seq2, sizeof(seq2) }
+};
+
+static int current_sequence = 0;
+static size_t key_idx = 0;
+static seq_state_t seq_state = SEQ_IDLE;
+static absolute_time_t seq_timer = {0};
+static absolute_time_t last_sequence_time = {0};
+
+void send_sequence_task(void) {
+    if (!tud_hid_ready()) return;
+
+    absolute_time_t now = get_absolute_time();
+
+    switch (seq_state) {
+        case SEQ_IDLE:
+            if (absolute_time_diff_us(last_sequence_time, now) > 5000000) { // 5s
+                key_idx = 0;
+                seq_state = SEQ_PRESS;
+                seq_timer = now;
+                last_sequence_time = now;
+            }
+            break;
+        case SEQ_PRESS:
+            if (key_idx < sequences[current_sequence].len) {
+                // FIX: Use a 6-byte array for the keycode
+                uint8_t keycodes[6] = { sequences[current_sequence].seq[key_idx], 0, 0, 0, 0, 0 };
+                tud_hid_keyboard_report(0, 0, keycodes);
+                seq_state = SEQ_RELEASE;
+                seq_timer = now;
+            } else {
+                seq_state = SEQ_WAIT_NEXT;
+                seq_timer = now;
+            }
+            break;
+        case SEQ_RELEASE:
+            if (absolute_time_diff_us(seq_timer, now) > 100000) { // 100ms
+                tud_hid_keyboard_report(0, 0, NULL);
+                key_idx++;
+                seq_state = SEQ_PRESS;
+                seq_timer = now;
+            }
+            break;
+        case SEQ_WAIT_NEXT:
+            // Wait for next 10s interval, then switch sequence
+            if (absolute_time_diff_us(last_sequence_time, now) > 10000000) {
+                current_sequence = (current_sequence + 1) % 2;
+                seq_state = SEQ_IDLE;
+                last_sequence_time = now;
+            }
+            break;
+    }
+}
+
 /*------------- MAIN -------------*/
 int main(void)
 {
@@ -100,10 +190,11 @@ int main(void)
         tud_task();
 
         // Poll every 10ms
-        if (absolute_time_diff_us(last_poll, get_absolute_time()) > 2000000) {
-            last_poll = get_absolute_time();
-            send_test(); // Send a test report every 2000ms
-        }
+       // if (absolute_time_diff_us(last_poll, get_absolute_time()) > 2000000) {
+       //     last_poll = get_absolute_time();
+       //     send_test(); // Send a test report every 2000ms
+       // }
+        send_sequence_task();
     }
     return 0;
 }
