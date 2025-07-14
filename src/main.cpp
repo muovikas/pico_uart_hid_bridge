@@ -36,7 +36,7 @@
 #include "hardware/gpio.h"
 #include "hardware/uart.h"
 #define UART_ID uart0
-#define BAUD_RATE 115200
+#define BAUD_RATE 9600
 #define UART_TX_PIN 0
 #define UART_RX_PIN 1
 
@@ -183,17 +183,33 @@ int main(void)
     board_init();
     tusb_init();
 
+    // Initialize UART at 9600 baud, 8N1
+    uart_init(UART_ID, BAUD_RATE);
+    gpio_set_function(UART_TX_PIN, GPIO_FUNC_UART);
+    gpio_set_function(UART_RX_PIN, GPIO_FUNC_UART);
+
     static absolute_time_t last_poll = {0};
 
     while (1)
     {
         tud_task();
 
-        // Poll every 10ms
-       // if (absolute_time_diff_us(last_poll, get_absolute_time()) > 2000000) {
-       //     last_poll = get_absolute_time();
-       //     send_test(); // Send a test report every 2000ms
-       // }
+        // UART echo and debug print
+        if (uart_is_readable(UART_ID)) {
+            uint8_t ch = uart_getc(UART_ID);
+
+            // Echo the character back
+            uart_putc(UART_ID, ch);
+
+            // Print debug message to UART
+            char msg[64];
+            snprintf(msg, sizeof(msg),
+                "Received character 0x%02X ('%c') from UART, send HID xxx\r\n",
+                ch, (ch >= 32 && ch <= 126) ? ch : '.');
+            for (char *p = msg; *p; ++p) uart_putc(UART_ID, *p);
+        }
+
+        // Continue running the HID sequence as before
         send_sequence_task();
     }
     return 0;
