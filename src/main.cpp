@@ -29,21 +29,17 @@
 
 #include "bsp/board.h"
 #include "tusb.h"
-
 #include "usb_descriptors.h"
-
 #include "hardware/gpio.h"
 #include "hardware/uart.h"
 
-volatile bool debug_mode = false;
-
+// UART configuration
 #define UART_ID uart0
 #define BAUD_RATE 9600
 #define UART_TX_PIN 0
 #define UART_RX_PIN 1
 
-// This is for debugging feature
-#define HID_KEY_A           0x04
+// HID keycodes for keypad and special keys
 #define HID_KEYPAD_0        0x62
 #define HID_KEYPAD_1        0x59
 #define HID_KEYPAD_2        0x5A
@@ -61,51 +57,20 @@ volatile bool debug_mode = false;
 #define HID_KEYPAD_PLUS     0x57
 #define HID_KEY_BACKSPACE   0x2A
 
-
-//--------------------------------------------------------------------+
-// MACRO CONSTANT TYPEDEF PROTYPES
-//--------------------------------------------------------------------+
-
-
-void hid_task(void);
-
-static void send_hid_report(bool keys_pressed, const uint8_t keycodes[6])
-{
-    if (!tud_hid_ready())
-        return;
-
-    if (keys_pressed)
-    {
-        tud_hid_keyboard_report(0, 0, keycodes);
-    }
-    else
-    {
-        tud_hid_keyboard_report(0, 0, NULL);
-    }
-}
-
-
-void send_test() {
-    uint8_t keycode = HID_KEYPAD_ASTERISK;
-    tud_hid_keyboard_report(0, 0, &keycode);
-    sleep_ms(10);
-    tud_hid_keyboard_report(0, 0, NULL);
-    sleep_ms(5);
-}
-
+// Sequence engine states
 typedef enum {
     SEQ_IDLE,
     SEQ_PRESS,
-    SEQ_RELEASE,
-    SEQ_WAIT_NEXT
+    SEQ_RELEASE
 } seq_state_t;
 
-// Single-key sequence buffer:
+// Sequence structure for HID key(s)
 typedef struct {
     const uint8_t* seq;
     size_t len;
 } keyseq_t;
 
+// Single-key sequence buffer
 static uint8_t single_seq[2] = {0, 0};
 static keyseq_t sequences[1] = {
     { single_seq, 1 }
@@ -115,8 +80,8 @@ static int current_sequence = 0;
 static size_t key_idx = 0;
 static seq_state_t seq_state = SEQ_IDLE;
 static absolute_time_t seq_timer = {0};
-static absolute_time_t last_sequence_time = {0};
 
+// Handles sending HID key press/release using the sequence engine
 void send_sequence_task(void) {
     if (!tud_hid_ready()) return;
 
@@ -127,14 +92,11 @@ void send_sequence_task(void) {
             // Do nothing, wait for UART to trigger a sequence
             break;
         case SEQ_PRESS:
+            // Send HID key press
             if (key_idx < sequences[current_sequence].len) {
                 uint8_t key = sequences[current_sequence].seq[key_idx];
-                uint8_t keycodes[6] = {0, 0, 0, 0, 0, 0};
-                if (key == HID_KEY_BACKSPACE) {
-                    keycodes[0] = HID_KEY_BACKSPACE; // Standard keyboard Backspace
-                } else {
-                    keycodes[0] = key; // Keypad or other
-                }
+                uint8_t keycodes[6] = {0};
+                keycodes[0] = key;
                 tud_hid_keyboard_report(0, 0, keycodes);
                 seq_state = SEQ_RELEASE;
                 seq_timer = now;
@@ -143,6 +105,7 @@ void send_sequence_task(void) {
             }
             break;
         case SEQ_RELEASE:
+            // Release HID key after 100ms
             if (absolute_time_diff_us(seq_timer, now) > 100000) { // 100ms
                 tud_hid_keyboard_report(0, 0, NULL);
                 key_idx++;
@@ -150,53 +113,41 @@ void send_sequence_task(void) {
                 seq_timer = now;
             }
             break;
-        case SEQ_WAIT_NEXT:
-            // Not used anymore
-            seq_state = SEQ_IDLE;
-            break;
     }
 }
 
+// Starts a new single-key HID sequence (called from UART handler)
 void start_single_key_sequence(uint8_t keycode) {
     single_seq[0] = keycode;
-    single_seq[1] = 0; // End marker (not used, but keeps length > 0)
-
+    single_seq[1] = 0; // End marker (not used)
     sequences[0].seq = single_seq;
     sequences[0].len = 1;
     current_sequence = 0;
     key_idx = 0;
     seq_state = SEQ_PRESS;
     seq_timer = get_absolute_time();
-    last_sequence_time = get_absolute_time();
 }
 
-// Remove start_demo_sequence() completely
-
-/*------------- MAIN -------------*/
 int main(void)
 {
     board_init();
     tusb_init();
 
-    // Initialize UART at 9600 baud, 8N1
+    // Initialize UART at 9600 8N1
     uart_init(UART_ID, BAUD_RATE);
     gpio_set_function(UART_TX_PIN, GPIO_FUNC_UART);
     gpio_set_function(UART_RX_PIN, GPIO_FUNC_UART);
 
-    // Ensure idle sequence at startup
     seq_state = SEQ_IDLE;
-    last_sequence_time = get_absolute_time();
 
     while (1)
     {
         tud_task();
 
-        // UART echo and HID trigger
+        // UART receive and HID trigger
         if (uart_is_readable(UART_ID)) {
             uint8_t ch = uart_getc(UART_ID);
-
-            // Echo the character back
-            uart_putc(UART_ID, ch);
+            uart_putc(UART_ID, ch); // Echo received character
 
             // Map UART character to HID keycode
             uint8_t keycode = 0;
@@ -228,13 +179,13 @@ int main(void)
                 ch, (ch >= 32 && ch <= 126) ? ch : '.', keycode ? "YES" : "NO");
             for (char *p = msg; *p; ++p) uart_putc(UART_ID, *p);
 
-            // Trigger sequence if key is mapped
+            // If mapped, start HID sequence
             if (keycode) {
                 start_single_key_sequence(keycode);
             }
         }
 
-        // Always run HID sequence
+        // Run the HID sequence engine
         send_sequence_task();
     }
     return 0;
@@ -243,7 +194,6 @@ int main(void)
 //--------------------------------------------------------------------+
 // USB HID callbacks
 //--------------------------------------------------------------------+
-
 
 void tud_hid_report_complete_cb(uint8_t instance, uint8_t const *report, uint8_t len)
 {
