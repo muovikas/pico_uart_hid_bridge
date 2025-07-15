@@ -101,36 +101,15 @@ typedef enum {
     SEQ_WAIT_NEXT
 } seq_state_t;
 
-const uint8_t seq1[] = {
-    HID_KEYPAD_ASTERISK,
-    HID_KEYPAD_7,
-    HID_KEYPAD_0,
-    HID_KEYPAD_6,
-    HID_KEYPAD_0,
-    HID_KEYPAD_ENTER,
-    HID_KEY_BACKSPACE,
-    HID_KEYPAD_0,
-};
-const uint8_t seq2[] = {
-    HID_KEYPAD_ASTERISK,
-    HID_KEYPAD_1,
-    HID_KEYPAD_4,
-    HID_KEYPAD_0,
-    HID_KEYPAD_7,
-    HID_KEYPAD_4,
-    HID_KEYPAD_ENTER,
-    HID_KEY_BACKSPACE,
-    HID_KEYPAD_0,
-};
-
+// Single-key sequence buffer:
 typedef struct {
     const uint8_t* seq;
     size_t len;
 } keyseq_t;
 
-keyseq_t sequences[] = {
-    { seq1, sizeof(seq1) },
-    { seq2, sizeof(seq2) }
+static uint8_t single_seq[2] = {0, 0};
+static keyseq_t sequences[1] = {
+    { single_seq, 1 }
 };
 
 static int current_sequence = 0;
@@ -146,12 +125,7 @@ void send_sequence_task(void) {
 
     switch (seq_state) {
         case SEQ_IDLE:
-            if (absolute_time_diff_us(last_sequence_time, now) > 5000000) { // 5s
-                key_idx = 0;
-                seq_state = SEQ_PRESS;
-                seq_timer = now;
-                last_sequence_time = now;
-            }
+            // Do nothing, wait for UART to trigger a sequence
             break;
         case SEQ_PRESS:
             if (key_idx < sequences[current_sequence].len) {
@@ -166,8 +140,7 @@ void send_sequence_task(void) {
                 seq_state = SEQ_RELEASE;
                 seq_timer = now;
             } else {
-                seq_state = SEQ_WAIT_NEXT;
-                seq_timer = now;
+                seq_state = SEQ_IDLE;
             }
             break;
         case SEQ_RELEASE:
@@ -179,18 +152,13 @@ void send_sequence_task(void) {
             }
             break;
         case SEQ_WAIT_NEXT:
-            // Wait for next 10s interval, then switch sequence
-            if (absolute_time_diff_us(last_sequence_time, now) > 10000000) {
-                current_sequence = (current_sequence + 1) % 2;
-                seq_state = SEQ_IDLE;
-                last_sequence_time = now;
-            }
+            // Not used anymore
+            seq_state = SEQ_IDLE;
             break;
     }
 }
 
 void start_single_key_sequence(uint8_t keycode) {
-    static uint8_t single_seq[2];
     single_seq[0] = keycode;
     single_seq[1] = 0; // End marker (not used, but keeps length > 0)
 
@@ -203,13 +171,7 @@ void start_single_key_sequence(uint8_t keycode) {
     last_sequence_time = get_absolute_time();
 }
 
-void start_demo_sequence(void) {
-    current_sequence = 0; // or 1, whichever you want to start with
-    key_idx = 0;
-    seq_state = SEQ_PRESS;
-    seq_timer = get_absolute_time();
-    last_sequence_time = get_absolute_time();
-}
+// Remove start_demo_sequence() completely
 
 /*------------- MAIN -------------*/
 int main(void)
@@ -225,8 +187,6 @@ int main(void)
     // Ensure idle sequence at startup
     seq_state = SEQ_IDLE;
     last_sequence_time = get_absolute_time();
-
-    static absolute_time_t last_poll = {0};
 
     while (1)
     {
