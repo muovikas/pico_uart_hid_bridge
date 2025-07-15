@@ -31,7 +31,6 @@
 #include "tusb.h"
 
 #include "usb_descriptors.h"
-//#include "keyboard.h"
 
 #include "hardware/gpio.h"
 #include "hardware/uart.h"
